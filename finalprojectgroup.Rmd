@@ -1,0 +1,210 @@
+---
+title: "Final Report Group Portion"
+author: "Yen Nhi Le, Tejas Patel, Jarod Woo, Parsa Masomi, Kaydence Le"
+date: "2024-12-11"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+INTRODUCTION:
+
+The opioid crisis has become a pressing public health issue in the United States, with overdose deaths increasing significantly since the late 1990s and total deaths exceeding half a million. In response, overdose prevention facilities were introduced as safe spaces for individuals to use opioids under medical supervision, reducing the risk of fatal overdoses through access to addiction treatment and support services.
+
+Central Question: How do state overdose prevention facilities influence opioid death rates across different regions of the U.S.?
+
+By examining the regional influence of these state-run facilities, geographical disparities in outcomes can illuminate different regions' successes and challenges, providing a clearer picture of how these facilities can be tailored to meet the needs of different communities. 
+
+
+
+DATA & METHODS:
+
+Data regarding opioid and drug overdose deaths was primarily retrieved from the CDC wonder database, spanning 1999-2020. This dataset was paired with a supporting dataset describing counts for drug overdose prevention facilities by state from 2004 to 2019. For preliminary analysis, trends in opioid-related crude death rates were analysed per region over time.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gganimate)
+```
+
+```{r, echo=FALSE}
+#cdc data cleaned
+cdc_data <- read.csv('cdc_data.csv')
+cdc <- cdc_data[cdc_data$Notes != "Total", ]
+cdc_clean <- cdc_data %>%
+  filter(Notes != "Total") %>%
+  select(-Notes, -contains("Code")) %>%
+  mutate(Crude.Rate = as.numeric(Crude.Rate))
+```
+
+```{r, echo=FALSE}
+# facilities data cleaned 
+statedata <- read.csv('statedata.csv')
+state <- statedata[statedata$INDICATOR == "SA_fac", ]
+```
+
+```{r, echo=FALSE}
+merged_data <- merge(cdc, state, by.x = c("State", "Year"), by.y = c("STATE", "YEAR"))
+merged_data$DeathsPerCapita <- merged_data$Deaths / merged_data$Population
+merged_data$FacilitiesPerCapita <- merged_data$VALUE / merged_data$Population
+```
+
+```{r, echo=FALSE}
+deaths <- cdc_data[cdc_data$Notes != "Total",]
+#cleaning facilities data
+facilities <- statedata[statedata$INDICATOR == "SA_fac",]
+region <- read.csv('states.csv')
+```
+
+```{r, echo=FALSE}
+both_data <- merge(deaths, facilities, by = c("State", "Year"), by.y = c("STATE", "YEAR"))
+both_data$DeathsPerCapita <- merged_data$Deaths / merged_data$Population
+both_data$FacilitiesPerCapita <- merged_data$VALUE / merged_data$Population
+```
+
+```{r, echo=FALSE}
+merged_data <- left_join(both_data, region, by = ("State" = "State"))
+merged_data <- merged_data %>% 
+  mutate(
+    `Crude.Rate` = na_if(`Crude.Rate`, "Unreliable"),
+    `Crude.Rate` = as.numeric(`Crude.Rate`), 
+  )
+merged_data <- na.omit(merged_data)
+```
+
+```{r, echo=FALSE}
+merged_data$State <- tolower(merged_data$State)
+state_geodata <- map_data("state")
+merged_data <- merge(merged_data, state_geodata, by.x = "State", by.y = "region")
+```
+
+```{r, echo=FALSE}
+merged_data$Crude.Rate <- as.numeric(gsub("Unreliable", NA, merged_data$Crude.Rate))
+
+region_summary <- merged_data %>%
+  group_by(Region, Year) %>%
+  summarize(
+    Avg_Crude_Rate = mean(Crude.Rate, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE)
+  )
+```
+
+
+TEMPORAL TRENDS
+```{r, echo=FALSE}
+ggplot(region_summary, aes(x = Year, y = Avg_Crude_Rate, color = Region)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Trends in Crude Death Rates Over Time by Region",
+    x = "Year",
+    y = "Average Crude Death Rate (per 100,000)",
+    color = "Census Region"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+```
+
+Crude death rates for all regions showed an upward trend from 1999 to 2020, though the rates of increase vary by region, with the Northeast region having the most gradual increase in crude death rates, while the South had the second most. Therefore, the initial assumption was that the most deaths per capita by state would be in the Northeast. 
+
+
+OPIOD-RELATED DEATHS PER CAPITA
+```{r, echo=FALSE}
+anim <- ggplot(merged_data, aes(x = long, y = lat, fill = DeathsPerCapita, group=group)) + # ggplot 
+  geom_polygon(color = "black") + # outline of the states colors
+    scale_fill_gradient(low = "blue", high = "red") +
+  coord_map("polyconic") + # polyconic is the type of geographic map which uses long and lat based on the cones which fill the Earth
+  theme_bw() + 
+  labs(
+    title = "Opioid-Related Deaths Per Capita",
+    subtitle = "Year: {frame_time}",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  ) +
+  transition_time(Year)
+```
+
+```{r, echo=FALSE}
+anim_save("mapdeaths.gif", anim)
+
+knitr::include_graphics('mapdeaths.gif')
+```
+
+Statewide deaths per capita were mapped across the U.S over the same time period to visualize the national distribution of deaths. Based on the shading per year of the heat map, the highest opioid deaths per capita per year seemed to be closer to the Northeast region, which means the initial assumption from the first graph was right.
+
+
+CHOOSING SPECIFIC STATES
+```{r, echo=FALSE}
+# Aggregate total deaths and population by state
+state_stats <- cdc_clean %>%
+  group_by(State) %>%
+  summarize(
+    Total_Deaths = sum(Deaths, na.rm = TRUE),
+    Total_Population = sum(Population, na.rm = TRUE),
+    Deaths_Per_Capita = Total_Deaths / Total_Population,
+    .groups = "drop"
+  )
+
+# Bar chart of deaths per capita by state
+ggplot(state_stats, aes(x = reorder(State, Deaths_Per_Capita), y = Deaths_Per_Capita)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Total Deaths Per Capita by State (1999-2020)",
+    x = "State",
+    y = "Deaths Per Capita"
+  ) +
+  theme_minimal()
+```
+
+This graph comparing per capita death counts for each of the individual states over time, shows that states with the highest total opioid deaths were indeed closer to the Northeast region with the exception of New Mexico. From these findings, we investigated the top 5 states - West Virginia, The District of Columbia, New Mexico, Kentucky, and Pennsylvania with the highest total death counts per capita.
+
+
+MODEL OF EACH STATE BY DEATHS AND FACILITIES
+```{r, echo=FALSE}
+highlighted_states <- merged_data[merged_data$State %in% c("kentucky", "west virginia", "pennsylvania", "new mexico", "district of columbia"), ]
+unique_states <- unique(highlighted_states$State)
+
+for (state in unique_states) {
+  state_data <- highlighted_states[highlighted_states$State == state, ]
+
+  plot <- ggplot(state_data, aes(x = FacilitiesPerCapita, y = DeathsPerCapita)) +
+    geom_point(aes(label = Year), color = "blue", size = 2, shape = 21, stroke = 1) +  
+    geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "solid") +
+    geom_text(aes(label = Year), vjust = -1, size = 3, color = "black") +
+    labs(
+      title = paste("Regression Plot for", state),
+      x = "Drug Facilities per Capita",
+      y = "Deaths of Despair per Capita"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 10, face = "bold"),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12)
+    )
+
+  print(plot)
+}
+```
+
+Finally, regression analyses were performed on the aforementioned five states, investigating per capita death counts relative to the number of overdose prevention facilities over time. West Virginia, New Mexico, Kentucky, and Pennsylvania all showed similar trends. The District of Columbia however showed the opposite. 
+
+
+CONCLUSION
+
+The analysis of opioid overdose death rates in the US from 1999-2020 revealed significant regional differences, with the Northeast experiencing the highest increase in crude death rates. While West Virginia, District of Columbia, Kentucky, and Pennsylvania had the highest number of opioid deaths per capita for the Northeast region,  New Mexico, which is in the South, was also a part of the highest number of opioid deaths per capita. The correlation between the number of opioid overdoses and the number of overdose prevention facilities in these states was found to be positive, with deaths per capita increasing over time despite increasing facilities. However, in the District of Columbia, the number of prevention facilities have been decreasing, and deaths per capita have continued to increase. These findings highlight the need for targeted interventions to reduce opioid overdose deaths. These data suggest that other factors are likely involved with increases in opioid deaths in the U.S over time, which may be more influential than the presence of overdose prevention facilities. 
